@@ -1,10 +1,7 @@
 <!doctype html>
 <html>
   <head>
-    # Make Last event Property Optional (Strict/Loose)
-    # 2 Way Funnel
-    # Draw when request complete, not waiting
-    # UI time
+
     
     <link rel="stylesheet" type="text/css" href="https://cdn.mxpnl.com/libs/mixpanel-platform/css/reset.css">
     <link rel="stylesheet" type="text/css" href="https://cdn.mxpnl.com/libs/mixpanel-platform/build/mixpanel-platform.v0.latest.min.css">
@@ -51,229 +48,282 @@
       <div id="eventSelect" style="float: left;"></div>
       <div id="dateRange" style="float: right;"></div>
       <div style="clear: both;"></div>
-      <button id="run" value="Run" style="margin-left: 10px; display: none;">Run</button>
+      <button id="run" value="Run" style=" display: none;">Run</button>
     <script>
+    
+    # Make Last event Property Optional (Strict/Loose)
+    # 2 Way Funnel
+    # UI time
+    
+      function stripParams(url) {
+        return url.slice( 0,  url.indexOf('?') == -1 ? url.length : url.indexOf('?') )
+      }
       var params = {
-        from: moment().subtract(29, 'days'),
+        from: moment().subtract(30, 'days'),
         to: moment(),
         length: 14,
         limit: 200,
         interval: 90
       }
+        
+      var objs = {};
+      /* Find the Top Page URLS */
       
-      MP.api.ready(function() {
-        var rootEventSelect = $('#eventSelect').MPEventSelect();
-        
-        var date = $('#dateRange').MPDatepicker();
-        /* Global Event List */
-        var rootEvent;
-        var objs = {};
-        var ids = new Set();
-        var graphData = {}
-        function randomNum() {
-            return _.random(0, 10000000);
-        }
-
-        var width = 960;
-        var height = 750;
-        var cluster = d3.layout.cluster()
-          .size([height, width - 160]);
-        var diagonal = d3.svg.diagonal()
-            .projection(function(d) { return [d.y, d.x]; });
-
-        var svg = d3.select("body").append("svg")
-            .attr("width", width)
-            .attr("height", height)
-            .call(d3.behavior.zoom().on("zoom", function () {
-                    svg.attr("transform", "translate(" + d3.event.translate + ")" + " scale(" + d3.event.scale + ")")
-                  })
-                )
-            .append("g")
-            .attr("transform", "translate(40,0)");
-
-        function addNode(data){
-
-          d3.selectAll(".text").remove();
-          d3.selectAll(".node").remove();
-          d3.selectAll(".link").remove();
-
-          var nodes = cluster.nodes(data),
-              links = cluster.links(nodes);
-
-          nodes.forEach(function(d) { d.y = d.depth * 180; });
-
-          var allLinks = svg.selectAll(".link").data(links);
-          var link = allLinks.enter().append("path")
-              .attr("class", "link")
-              .style('stroke-width', function(d) {
-                return ( d.target.root * .2 );
-              });
-
-          allLinks.transition().duration(1000).attr("d", diagonal);
-
-          var allNodes = svg.selectAll(".node").data(nodes);
-          var node = allNodes.enter().append("g")
-              .attr("class", "node")
-              .attr("transform", function(d) { return "translate(" + d.y + "," + d.x + ")"; })
-              .style('cursor','pointer')
-              .style('opacity', 0.6)
-              .on('mouseover', function(d){
-                  d3.select(this).style('opacity', 1.0)
-                  d3.select("text").style('opacity', 1.0);
-              })
-              .on('mouseout', function(d){
-                d3.select(this).style('opacity', 0.6)
-              })
-              .on('click', function(val){
-                  console.log (val)
-                  if (val.children) {
-                    val._children = val.children;
-                    val.children = null;
-                    addNode(graphData)
-                  } else if (val._children) {
-                    val.children = val._children;
-                    addNode(graphData);
-                  } else {
-                    val._children = true ;
-                    nodeQuery(objs, val);
-                  }
-              });
-
-          node.append('svg:title')
-            .text(function(d) {
-              var count = 'Count: ' + String(d.count) + '\n';
-              var parent = 'Conversion From Parent Event: ' + String(d.conversion) + '%\n';
-              var root = 'Conversion From Root Event: ' + String(d.root) + '%';
-              return count + parent + root });
-          node.append("circle")
-              .attr("r", 4.5);
-
-          node.append("text")
-              .attr("dx", function(d) { return d.children ? 0 : 8; })
-              .attr("dy", function(d) { return d.children ? 18 : 3; })
-              .text(function(d) { return d.name; })
-              .attr("text-anchor", function(d){
-                return ( d.children ? "middle" : undefined );
-              });
+      var pageViewValueParams = {
+            limit: 25
         };
+        
+      var pageViewProps = MP.api.propertyValues('pageview', '$current_url', pageViewValueParams)
+      
+      var urlPropList = [];
+      
+      $.when(pageViewProps).done(function(props){
+          /* Cache top props */
+          objs = props.values();
+          _.each(objs, function(urlProp){
+            urlPropList.push(urlProp);
+            
+          });
+          var items = [];
+        _.each(urlPropList, function(prop){
+          
+          var dct = {};
+          var index = urlPropList.indexOf(prop);
+          dct['label'] = prop;
+          dct['value'] = objs[index];
+          items.push(dct);
+        });
+        var options = {}
+        /* Sort Items */
+        options['items'] = _.sortBy(items, 'label');
+        var dropdown = $('#eventSelect').MPSelect(options);
+        $('#run').show();
+      });
+      
+      
+      /* Global Event List */
+      var rootEvent;
+      
+      var graphData = {}
 
-        /* Let the Funnel Queries Begin... */
 
-        var nodeQuery = function(event_list, node){
-            /* Dict with top counts for each event */
-            var nodes = {};
-            var promises = [];
-            _.each(_.keys(event_list), function(key) {
-              var event = event_list[key];
-              var parent = node.parent;
-              var events = [];
-              if (event != node.name) {
-                /* Build a list of promises */
-                selector_str = '(string(properties["Last Event"]) == "' + node.name + '")'
+      var width = 960;
+      var height = 750;
+      var cluster = d3.layout.cluster()
+        .size([height, width - 160]);
+      var diagonal = d3.svg.diagonal()
+          .projection(function(d) { return [d.y, d.x]; });
+
+      var svg = d3.select("body").append("svg")
+          .attr("width", width)
+          .attr("height", height)
+          .call(d3.behavior.zoom().on("zoom", function () {
+                  svg.attr("transform", "translate(" + d3.event.translate + ")" + " scale(" + d3.event.scale + ")")
+                })
+              )
+          .append("g")
+          .attr("transform", "translate(40,0)");
+
+      function addNode(data){
+
+        d3.selectAll(".text").remove();
+        d3.selectAll(".node").remove();
+        d3.selectAll(".link").remove();
+
+        var nodes = cluster.nodes(data),
+            links = cluster.links(nodes);
+
+        nodes.forEach(function(d) { d.y = d.depth * 180; });
+
+        var allLinks = svg.selectAll(".link").data(links);
+        var link = allLinks.enter().append("path")
+            .attr("class", "link")
+            .style('stroke-width', function(d) {
+              return ( d.target.conversion * .18);
+            });
+
+        allLinks.transition().duration(1000).attr("d", diagonal);
+
+        var allNodes = svg.selectAll(".node").data(nodes);
+        var node = allNodes.enter().append("g")
+            .attr("class", "node")
+            .attr("transform", function(d) { return "translate(" + d.y + "," + d.x + ")"; })
+            .style('cursor','pointer')
+            .style('opacity', 0.6)
+            .on('mouseover', function(d){
+                d3.select(this).style('opacity', 1.0)
+                d3.select("text").style('opacity', 1.0);
+            })
+            .on('mouseout', function(d){
+              d3.select(this).style('opacity', 0.6)
+            })
+            .on('click', function(val){
                 
-                //'(string(properties["Last Event"]) == "' + node.name + '")'
-                events.push({'event': event, 'selector': selector_str });
-                if (parent) {
-                  selector_str = '(string(properties["Last Event"]) == "' + parent.name + '")'
+                if (val.children) {
+                  val._children = val.children;
+                  val.children = null;
+                  addNode(graphData)
+                } else if (val._children) {
+                  val.children = val._children;
+                  addNode(graphData);
+                } else {
+                  val._children = true ;
+                  nodeQuery(objs, val);
                 }
-                events.push({'event': node.name, 'selector': selector_str});
-                
-                while (parent) {
-                  if(parent.parent){                
-                    selector_str = '(string(properties["Last Event"]) == "' + parent.parent.name + '")'
-                  }
-                  events.push({'event': parent.name, 'selector': selector_str});
-                  parent = parent.parent
-                }
-                delete events[events.length -1].selector
-                events.reverse();
-                events.push(params)
-                promises.push(MP.api.funnel.apply(MP.api, events));
+            });
+
+        node.append('svg:title')
+          .text(function(d) {
+            var count = 'Count: ' + String(d.count) + '\n';
+            var parent = 'Conversion to the Parent Event: ' + String(d.conversion) + '%\n';
+            var root = 'Conversion From Root Event: ' + String(d.root) + '%';
+            return count +  parent + root});
+        node.append("circle")
+            .attr("r", 4.5);
+
+        node.append("text")
+            .attr("dx", function(d) { return d.children ? 0 : 8; })
+            .attr("dy", function(d) { return d.children ? 18 : 3; })
+            .text(function(d) { return d.name; })
+            .attr("text-anchor", function(d){
+              return ( d.children ? "middle" : undefined );
+            });
+      };
+
+      /* Let the Funnel Queries Begin... */
+
+      var nodeQuery = function(propList, node){
+        /* Dict with top counts for each event */
+        var nodes = {};
+        var promises = [];
+        
+        _.each(_.keys(propList), function(key) {
+          var event = propList[key];
+          var parent = node;
+          var selector_str;
+          var events = [];
+          while (parent){
+            selector_str = '(string(properties["$current_url"]) == "' + event + '") and "' + stripParams(parent.name)  + '" in string(properties["$referrer"])';
+            events.push({'event': 'pageview', 'selector': selector_str });
+            event = parent.name
+            parent = parent.parent
+          }
+          selector_str = '(string(properties["$current_url"]) == "' + event + '")';
+          events.push({'event': 'pageview', 'selector': selector_str });
+          events.reverse()
+          events.push(params)
+          promises.push(MP.api.funnel.apply(MP.api, events));
+        });
+
+        Promise.all(promises).then(function(promiseArray){
+          /* promiseArray is a list of funnel responses */
+          _.each(promiseArray, function(data){
+              /* data is a list of the funnel steps */
+             
+              var total = 0;
+              var length = data.length - 1;
+              _.each(_.values(data[length]), function(funnelObj){ total += funnelObj.count });
+              var name = objs[promiseArray.indexOf(data)]
+              nodes[name] = {
+                'total' : total,
+                'name' : name,
+                'conversion' : data[length][_.keys(data[length])[0]]['overall_conv_ratio']
+              };
+          });
+        }).then(function(){
+          _.each(_.keys(nodes), function(key){
+             /*
+                Build a node object with the conversion percentage and other meta data and add it to the children
+                of the parent node
+             */
+              var conversion = Math.floor(nodes[key]['conversion'] * 100);
+              var root = Math.floor(nodes[key]['total'] / graphData.count * 100);
+              if (conversion < 1 ) { return };
+              if (node.children) {
+                  node.children.push({
+                    'name': key,
+                    'root': root,
+                    'conversion': conversion,
+                    'count': nodes[key]['total']
+                  });
+              } else {
+                  node.children = [{
+                    'name': key,
+                    'root': root,
+                    'conversion': conversion,
+                    'count': nodes[key]['total']
+                  }];
               }
-            });
-
-            Promise.all(promises).then(function(promiseArray){
-              _.each(promiseArray, function(data){
-                  total = 0;
-                  var length = data.length - 1;
-                  _.each(_.values(data[length]), function(funnelObj){ total += funnelObj.count });
-                  nodes[_.values(data[length])[0].event] = total;
-              });
-            }).then(function(){
-               /* Add Data to Graph Data */
-               var total = _.values(nodes).reduce(function(a , b){return a + b;});
-
-               _.each(_.keys(nodes), function(key){
-                 /*
-                    Build a node object with the conversion percentage and other meta data and add it to the children
-                    of the parent node
-                 */
-                  var rando = randomNum();
-                  var conversion = Math.floor(nodes[key] / node.count * 100);
-                  var root = Math.floor(nodes[key] / graphData.count * 100);
-                  if (conversion < 1 ) { return };
-                  if (node.children) {
-                      node.children.push({
-                        'name':key,
-                        'id':rando,
-                        'root': root,
-                        'conversion': conversion,
-                        'count':nodes[key]
-                      });
-                  } else {
-                      node.children = [{
-                        'name':key,
-                        'id':rando,
-                        'root': root,
-                        'conversion': conversion,
-                        'count':nodes[key]
-                      }];
-                  }
-               })
-               addNode(graphData);
-            });
-        }
+           })
+           addNode(graphData);
+        });
+      }
+    
+    
+      $('#run').on('click', function(e){
+        var rootProp = $('#eventSelect').MPSelect('value');
+        var rootEvent = "pageview";
+        var dates = $('#dateSelect').MPSelect('value')
         
-        date.on('change', function(e, dates) {                          // Do something when the dates are changed
-          params.from = dates.from;
-          params.to = dates.to;
+        params.from = dates.from;
+        params.to = dates.to;
+        
+        /* This Event Represents the Origin of the User Flow Diagram. */
+        
+        graphData = {
+          'eventName':rootProp,
+          'name': rootProp,
+          'id': 1,
+        };
+        
+        var rootParams = {
+          from: params.from,
+          to: params.to,
+          type: 'unique',
+          interval: 32,
+          where: '(string(properties["$current_url"]) == "' + stripParams(rootProp) + '")'
+      };
+        /* Find the Root Event Count */
+        var rootEventCount = MP.api.segment(rootEvent,rootParams);
+        
+        $.when(rootEventCount).done(function(eventCount){
+            graphData.count = eventCount.sum().values()[rootEvent];
+            addNode(graphData);
         });
         
-        rootEventSelect.on('change', function(e, Name){
-          $('#run').show();
-        });
         
-        $('#run').on('click', function(e){
-          rootEvent = rootEventSelect.MPEventSelect('value');
-          /* This Event Represents the Origin of the User Flow Diagram. */
-          graphData = {
-            'name': rootEvent,
-            'id': 1,
-            'conversion': 100,
-            'root': 100
-          };
+        // rootEvent = rootEventSelect.MPEventSelect('value');
+        // /* This Event Represents the Origin of the User Flow Diagram. */
+        // graphData = {
+        //   'name': rootEvent,
+        //   'id': 1,
+        //   'conversion': 100,
+        //   'root': 100
+        // };
 
-          /* Find the Root Event Count */
-          var rootEventCount = MP.api.funnel(rootEvent, params);
-          $.when(rootEventCount).done(function(eventCount){
-              var eventTotal = 0;
-              _.each(_.values(eventCount[0]), function(count){ eventTotal += count.count});
-              graphData.count = eventTotal;
-              addNode(graphData);
-          });
+        // /* Find the Root Event Count */
+        // var rootEventCount = MP.api.funnel(rootEvent, params);
+        // $.when(rootEventCount).done(function(eventCount){
+        //     var eventTotal = 0;
+        //     _.each(_.values(eventCount[0]), function(count){ eventTotal += count.count});
+        //     graphData.count = eventTotal;
+        //     addNode(graphData);
+        // });
 
 
-          /* Top Event Queries   */
-          var topEventsParams = {'limit':'30'};
-          var topEvents = MP.api.topEvents(topEventsParams);
+        // /* Top Event Queries   */
+        // var topEventsParams = {'limit':'30'};
+        // var topEvents = MP.api.topEvents(topEventsParams);
 
-          /* Funnel Queries */
-          $.when(topEvents).done(function(events){
-              /* Cache top events */
-              objs = events.values();
-          });
-        });
-       });
+        // /* Funnel Queries */
+        // $.when(topEvents).done(function(events){
+        //     /* Cache top events */
+        //     objs = events.values();
+        // });
+        
+      });
+      
+     
     </script>
   </body>
 </html>
